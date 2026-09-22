@@ -1,15 +1,16 @@
 param([switch]$uninstall)
 
+$componentName = "FastReport"
 $PackagesVCL = Join-Path $PWD "PackagesVCL"
 $frReportFilesDproj = Join-Path $PackagesVCL "frReportFiles.dproj"
 
 if (!(Test-Path $frReportFilesDproj)) {
-    Write-Host "Invalid FastReport directory: $PWD"
+    Write-Host "Invalid $componentName directory: $PWD"
     exit 1
 }
 
-$prompt = $uninstall ? "Uninstall FastReport from" : "Install FastReport to"
-$json = radstudio select "${prompt}:" --json | ConvertFrom-Json
+$prompt = $uninstall ? "Uninstall $componentName from:" : "Install $componentName to:"
+$json = radstudio select $prompt --json | ConvertFrom-Json
 
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
@@ -50,7 +51,7 @@ if ($uninstall) {
     foreach ($platform in $ide.ide_platforms) {
         $outputDir = Join-Path $vclDir $platform
         radstudio $name --platform=$platform build (Join-Path $PackagesVCL "dclfrReportFiles.dproj")
-        radstudio $name --platform=$platform package register (Join-Path $outputDir $dclfrReportFilesBpl)
+        radstudio $name --platform=$platform package register (Join-Path $outputDir $dclfrReportFilesBpl) $componentName
         radstudio $name --platform=$platform env-path add $outputDir
     }
 }
