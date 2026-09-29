@@ -1,4 +1,14 @@
-param([switch]$uninstall)
+param(
+    [switch]$uninstall,
+    [switch]$all,    
+    [switch]$bde,
+    [switch]$ibx,
+    [switch]$ibo,
+    [switch]$fib,
+    [switch]$tee,
+    [switch]$rave
+)
+$env:Path = "$PSScriptRoot;$PWD;$env:Path"
 
 $componentName = "FastReport VCL"
 $prompt = $uninstall ? "Uninstall $componentName from:" : "Install $componentName to:"
@@ -34,6 +44,14 @@ $dpks = @("frCoreLibrary", "frGraphicsLibrary", "frLocalizationLibrary", "frCont
     "fcx", "fcxe", "fcxfs", "fcxp")
 $languages = (Get-ChildItem -Path $dpkDir "frLanguage*.dpk").BaseName | % { $_.Substring(0, $_.Length - $packageVersion.Length) }
 $dpks += $languages
+if ($uninstall) { $all = $true }
+if ($all -or $bde) { $dpks += @("fsBDE", "fqbBDE", "frxBDE", "frxBDEQueryBuilder") }
+if ($all -or $ibx) { $dpks += @("fsIBX", "fqbIBX", "frxIBX", "frxIBXQueryBuilder") }
+if ($all -or $ibo) { $dpks += @("frxIBO") }
+if ($all -or $fib) { $dpks += @("fqbFIB", "frxFIB", "frxFIBQueryBuilder") }
+if ($rave) { $tee = $true }
+if ($all -or $tee) { $dpks += @("fsTee", "frxTee", "fcxpTee", "fcxc", "frxReportConverters") }
+if ($all -or $rave) { $dpks += @("frxReportConverterRave") }
 
 $SourcesDir = "Sources"
 $sourceDirs = (Get-ChildItem -Path $SourcesDir -Directory).FullName
@@ -42,6 +60,51 @@ $sourceDirs = $sourceDirs -join ";"
 
 $LibDir = Join-Path $PWD "Lib"
 $RSDir = Join-Path $LibDir "RS$packageVersion"
+
+function Main() {
+    if ($uninstall) { Uninstall } else { Install }
+    Write-Host "Done!" -ForegroundColor Green    
+}
+
+function Install() {
+    $platforms = "Win32", "Win64"
+    foreach ($platform in $platforms) {
+        if ($platform -notin $ide.platforms) { continue }
+        $outputDir = Join-Path $RSDir $platform
+        radstudio $name --platform=$platform library-path add $outputDir
+        radstudio $name --platform=$platform browsing-path add $sourceDirs
+        foreach ($dpk in $dpks) {
+            compilePackage $dpk $false $platform $outputDir
+        }
+        Get-ChildItem -Path "$SourcesDir\*" -Recurse -File -Include "*.dfm", "*.res", "*.inc" | Copy-Item -Destination $outputDir -Force
+    }
+
+    foreach ($platform in $ide.ide_platforms) {
+        $outputDir = Join-Path $RSDir $platform
+        radstudio $name --platform=$platform env-path add $outputDir
+        foreach ($dpk in $dpks) {
+            compilePackage $dpk $true $platform $outputDir
+        }
+    }
+}
+
+function Uninstall() {
+    foreach ($platform in $ide.ide_platforms) {
+        $bplDir = Join-Path $RSDir $platform
+        foreach ($dpk in $dpks) {
+            radstudio $name --platform=$platform package unregister (Join-Path $bplDir "dcl$dpk$packageVersion.bpl")
+        }
+        radstudio $name --platform=$platform env-path remove $bplDir
+    }
+
+    foreach ($platform in $ide.platforms) {
+        radstudio $name --platform=$platform library-path remove (Join-Path $RSDir $platform)
+        radstudio $name --platform=$platform browsing-path remove $sourceDirs
+    }
+
+    if (Test-Path $RSDir) {Remove-Item $RSDir -Recurse}
+    Remove-Item $LibDir -ErrorAction Ignore    
+}
 
 function compilePackage($dpk, $isDesigntime, $platform, $outputDir) {
     $dpk = "$dpk$packageVersion.dpk"
@@ -62,42 +125,4 @@ function compilePackage($dpk, $isDesigntime, $platform, $outputDir) {
         --package-dcp-output-dir=$outputDir `
 }
 
-if ($uninstall) {
-    foreach ($platform in $ide.ide_platforms) {
-        $bplDir = Join-Path $RSDir $platform
-        foreach ($dpk in $dpks) {
-            radstudio $name --platform=$platform package unregister (Join-Path $bplDir "dcl$dpk$packageVersion.bpl")
-        }
-        radstudio $name --platform=$platform env-path remove $bplDir
-    }
-
-    foreach ($platform in $ide.platforms) {
-        radstudio $name --platform=$platform library-path remove (Join-Path $RSDir $platform)
-        radstudio $name --platform=$platform browsing-path remove $sourceDirs
-    }
-
-    if (Test-Path $RSDir) {Remove-Item $RSDir -Recurse}
-    Remove-Item $LibDir -ErrorAction Ignore
-} else {
-    $platforms = "Win32", "Win64"
-    foreach ($platform in $platforms) {
-        if ($platform -notin $ide.platforms) { continue }
-        $outputDir = Join-Path $RSDir $platform
-        radstudio $name --platform=$platform library-path add $outputDir
-        radstudio $name --platform=$platform browsing-path add $sourceDirs
-        foreach ($dpk in $dpks) {
-            compilePackage $dpk $false $platform $outputDir
-        }
-        Get-ChildItem -Path "$SourcesDir\*" -Recurse -File -Include "*.dfm", "*.res" | Copy-Item -Destination $outputDir -Force
-    }
-
-    foreach ($platform in $ide.ide_platforms) {
-        $outputDir = Join-Path $RSDir $platform
-        radstudio $name --platform=$platform env-path add $outputDir
-        foreach ($dpk in $dpks) {
-            compilePackage $dpk $true $platform $outputDir
-        }
-    }
-}
-
-Write-Host "Done!" -ForegroundColor Green
+Main
