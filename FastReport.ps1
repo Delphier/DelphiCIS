@@ -25,6 +25,7 @@ if ($json.Count -eq 0) {
 $ide = $json[0]
 $name = $ide.name
 $packageVersion = $ide.package_version
+$hasCBuilder = "CBuilder" -in $ide.personalities
 
 $dpkDir = "LibRS$packageVersion\VCL"
 if (!(Test-Path $dpkDir)) {
@@ -67,17 +68,8 @@ function Main() {
 }
 
 function Install() {
-    $platforms = "Win32", "Win64"
-    foreach ($platform in $platforms) {
-        if ($platform -notin $ide.platforms) { continue }
-        $outputDir = Join-Path $RSDir $platform
-        radstudio $name --platform=$platform library-path add $outputDir
-        radstudio $name --platform=$platform browsing-path add $sourceDirs
-        foreach ($dpk in $dpks) {
-            compilePackage $dpk $false $platform $outputDir
-        }
-        Get-ChildItem -Path "$SourcesDir\*" -Recurse -File -Include "*.dfm", "*.res", "*.inc" | Copy-Item -Destination $outputDir -Force
-    }
+    foreach ($platform in "Win32", "Win64") { InstallRuntimePackages $platform }
+    if ($hasCBuilder) { InstallRuntimePackages "Win64x" }
 
     foreach ($platform in $ide.ide_platforms) {
         $outputDir = Join-Path $RSDir $platform
@@ -86,6 +78,21 @@ function Install() {
             compilePackage $dpk $true $platform $outputDir
         }
     }
+}
+
+function InstallRuntimePackages($platform) {
+    if ($platform -notin $ide.platforms) { return }
+    $outputDir = Join-Path $RSDir $platform
+    radstudio $name --platform=$platform library-path add $outputDir
+    radstudio $name --platform=$platform browsing-path add $sourceDirs
+    if ($hasCBuilder) {
+        radstudio $name --platform=$platform cpp-library-path add $outputDir
+        radstudio $name --platform=$platform cpp-browsing-path add $sourceDirs        
+    }
+    foreach ($dpk in $dpks) {
+        compilePackage $dpk $false $platform $outputDir
+    }
+    Get-ChildItem -Path "$SourcesDir\*" -Recurse -File -Include "*.dfm", "*.res", "*.inc" | Copy-Item -Destination $outputDir -Force
 }
 
 function Uninstall() {
@@ -100,6 +107,10 @@ function Uninstall() {
     foreach ($platform in $ide.platforms) {
         radstudio $name --platform=$platform library-path remove (Join-Path $RSDir $platform)
         radstudio $name --platform=$platform browsing-path remove $sourceDirs
+        if ($hasCBuilder) {
+            radstudio $name --platform=$platform cpp-library-path remove (Join-Path $RSDir $platform)
+            radstudio $name --platform=$platform cpp-browsing-path remove $sourceDirs
+        }
     }
 
     if (Test-Path $RSDir) {Remove-Item $RSDir -Recurse}
@@ -117,12 +128,17 @@ function compilePackage($dpk, $isDesigntime, $platform, $outputDir) {
     Write-Host "===============================================" -ForegroundColor Green
 
     $cmd = $isDesigntime ? @("package", "compile", "--install") : @("dcc")
+    if ($hasCBuilder) { $cmd += "--cpp" }
+    if ($platform -eq "Win64x") { $cmd += "--cpp-win64x" }
     radstudio $name @cmd $dpk -b -q --no-warnings `
         --platform=$platform `
         --unit-search-dirs=$sourceDirs `
         --unit-output-dir=$outputDir `
         --package-bpl-output-dir=$outputDir `
         --package-dcp-output-dir=$outputDir `
+        --cpp-bpi-output-dir=$outputDir `
+        --cpp-hpp-output-dir=$outputDir `
+        --cpp-obj-output-dir=$outputDir `
 }
 
 Main
